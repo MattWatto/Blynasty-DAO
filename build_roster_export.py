@@ -23,6 +23,7 @@ PLAYER_ID_COL = "player_id"             # column names in PLAYERS_FILE -- adjust
 PLAYER_NAME_COL = "full_name"
 PLAYER_POSITION_COL = "position"
 OUTPUT_FILE = BASE_DIR / "Output" / "roster_export.xlsx"
+POSITION_ORDER = ["QB", "WR", "RB", "TE"]   # players sort into this order within each team; anything else goes last
 FUTURE_DRAFT_YEARS = 2                  # how many draft classes ahead of the current season to include
 DEFAULT_ROUNDS = 4                      # fallback if the draft's round count can't be found
 BASE_URL = "https://api.sleeper.app/v1"
@@ -72,19 +73,23 @@ def main():
                 key = (str(season), rnd, orig_roster_id)
                 pick_ownership[key] = traded_owner.get(key, orig_roster_id)
 
-    # player_id -> "Name, POS"
+    # player_id -> (position, "Name, POS")
     players = pd.read_excel(PLAYERS_FILE, dtype={PLAYER_ID_COL: str})
-    player_label = dict(zip(
-        players[PLAYER_ID_COL],
-        players[PLAYER_NAME_COL] + ", " + players[PLAYER_POSITION_COL],
-    ))
+    player_info = {
+        pid: (pos, f"{name}, {pos}")
+        for pid, name, pos in zip(players[PLAYER_ID_COL], players[PLAYER_NAME_COL], players[PLAYER_POSITION_COL])
+    }
 
     team_rows = {team: [] for team in team_name_by_roster.values()}
 
+    def position_rank(position):
+        return POSITION_ORDER.index(position) if position in POSITION_ORDER else len(POSITION_ORDER)
+
     for r in rosters:
         team = team_name_by_roster[r["roster_id"]]
-        for pid in r.get("players") or []:
-            team_rows[team].append(player_label.get(str(pid), str(pid)))
+        roster_players = [player_info.get(str(pid), (None, str(pid))) for pid in r.get("players") or []]
+        roster_players.sort(key=lambda p: position_rank(p[0]))
+        team_rows[team].extend(label for _, label in roster_players)
 
     for (season, rnd, orig_roster_id), owner_roster_id in pick_ownership.items():
         team = team_name_by_roster[owner_roster_id]
