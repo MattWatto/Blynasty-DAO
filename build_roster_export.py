@@ -47,14 +47,15 @@ def get_draft_rounds(league_id):
     return DEFAULT_ROUNDS
 
 
-def primary_position(fantasy_positions):
-    # fantasy_positions can be a real list, or a stringified one like "['QB']" if the
-    # players file was saved straight from Sleeper's API response; take the first entry either way
+def get_positions(fantasy_positions):
+    # fantasy_positions can be a real list (e.g. Travis Hunter -> ["WR", "DB"]), or a
+    # stringified one like "['WR', 'DB']" if the players file was saved straight from
+    # Sleeper's API response, or a single plain string; always return a list
     if isinstance(fantasy_positions, str) and fantasy_positions.startswith("["):
         fantasy_positions = ast.literal_eval(fantasy_positions)
     if isinstance(fantasy_positions, (list, tuple)):
-        return fantasy_positions[0] if fantasy_positions else None
-    return fantasy_positions
+        return list(fantasy_positions)
+    return [fantasy_positions] if pd.notna(fantasy_positions) else []
 
 
 def main():
@@ -87,7 +88,7 @@ def main():
                 key = (str(season), rnd, orig_roster_id)
                 pick_ownership[key] = traded_owner.get(key, orig_roster_id)
 
-    # player_id -> (position, age, "Name, POS (Age y/o; Exp exp)")
+    # player_id -> (positions, age, "Name, POS1/POS2 (Age y/o; Exp exp)")
     players = pd.read_excel(PLAYERS_FILE, dtype={PLAYER_ID_COL: str})
     player_info = {}
     for pid, name, fantasy_positions, age, years_exp in zip(
@@ -97,7 +98,7 @@ def main():
         players[PLAYER_AGE_COL],
         players[PLAYER_YEARS_EXP_COL],
     ):
-        pos = primary_position(fantasy_positions)
+        positions = get_positions(fantasy_positions)
         # a missing value anywhere in a numeric column upcasts the whole column to float64,
         # so round-trip through int for display and just omit values that are missing
         details = []
@@ -106,20 +107,25 @@ def main():
         if pd.notna(years_exp):
             details.append(f"{int(years_exp)} exp")
         details_text = f" ({'; '.join(details)})" if details else ""
-        player_info[pid] = (pos, age, f"{name}, {pos}{details_text}")
+        player_info[pid] = (positions, age, f"{name}, {'/'.join(positions)}{details_text}")
 
     team_rows = {team: [] for team in team_name_by_roster.values()}
 
-    def position_rank(position):
-        return POSITION_ORDER.index(position) if position in POSITION_ORDER else len(POSITION_ORDER)
+    def position_rank(positions):
+        # ranks by whichever listed position matches POSITION_ORDER first (e.g. a WR/DB
+        # player ranks as a WR, since DB isn't one of the tracked groups)
+        for position in positions:
+            if position in POSITION_ORDER:
+                return POSITION_ORDER.index(position)
+        return len(POSITION_ORDER)
 
     def sort_key(player):
-        position, age, _ = player
-        return (position_rank(position), age if pd.notna(age) else float("inf"))
+        positions, age, _ = player
+        return (position_rank(positions), age if pd.notna(age) else float("inf"))
 
     for r in rosters:
         team = team_name_by_roster[r["roster_id"]]
-        roster_players = [player_info.get(str(pid), (None, None, str(pid))) for pid in r.get("players") or []]
+        roster_players = [player_info.get(str(pid), ([], None, str(pid))) for pid in r.get("players") or []]
         roster_players.sort(key=sort_key)
         team_rows[team].extend(label for _, _, label in roster_players)
 
