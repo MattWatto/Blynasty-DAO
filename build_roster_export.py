@@ -2,7 +2,7 @@
 Pulls rosters, league users, and traded picks from the Sleeper API, assigns every
 draft pick (traded or not) to whichever team currently owns it, joins player names,
 fantasy positions, ages, and years of experience from a locally-saved players file,
-ranks teams by wins (fpts_decimal breaks ties), and writes one Excel sheet per export
+ranks teams by wins (total fantasy points breaks ties), and writes one Excel sheet per export
 run with each team's roster listed vertically (players first, then picks) under a
 header like "Shakers & Bakers (1-6) 11th".
 
@@ -84,11 +84,12 @@ def main():
             (user.get("metadata") or {}).get("team_name") or user.get("display_name") or f"Roster {r['roster_id']}"
         )
 
-    # standings rank: most wins first, fpts_decimal (higher is better) breaks ties
-    standings = sorted(
-        rosters,
-        key=lambda r: (-r.get("settings", {}).get("wins", 0), -r.get("settings", {}).get("fpts_decimal", 0)),
-    )
+    # standings rank: most wins first, total fantasy points (higher is better) breaks ties
+    def total_points(r):
+        settings = r.get("settings", {})
+        return settings.get("fpts", 0) + settings.get("fpts_decimal", 0) / 100
+
+    standings = sorted(rosters, key=lambda r: (-r.get("settings", {}).get("wins", 0), -total_points(r)))
     rank_by_roster = {r["roster_id"]: place for place, r in enumerate(standings, start=1)}
 
     # column header per roster_id, e.g. "Shakers & Bakers (1-6) 11th"
