@@ -1,7 +1,7 @@
 """
 Pulls rosters, league users, and traded picks from the Sleeper API, assigns every
 draft pick (traded or not) to whichever team currently owns it, joins player names
-from a locally-saved players file, and writes one Excel sheet per export run with
+and positions from a locally-saved players file, and writes one Excel sheet per export run with
 each team's roster listed vertically (players first, then picks).
 
 Run with: python build_roster_export.py
@@ -21,6 +21,7 @@ LEAGUE_ID = "1314308900652056576"
 PLAYERS_FILE = BASE_DIR / "Input" / "sleeper_players.xlsx"   # produced by the separate player-pull script
 PLAYER_ID_COL = "player_id"             # column names in PLAYERS_FILE -- adjust if different
 PLAYER_NAME_COL = "full_name"
+PLAYER_POSITION_COL = "position"
 OUTPUT_FILE = BASE_DIR / "Output" / "roster_export.xlsx"
 FUTURE_DRAFT_YEARS = 2                  # how many draft classes ahead of the current season to include
 DEFAULT_ROUNDS = 4                      # fallback if the draft's round count can't be found
@@ -71,16 +72,19 @@ def main():
                 key = (str(season), rnd, orig_roster_id)
                 pick_ownership[key] = traded_owner.get(key, orig_roster_id)
 
-    # player_id -> full name
+    # player_id -> "Name, POS"
     players = pd.read_excel(PLAYERS_FILE, dtype={PLAYER_ID_COL: str})
-    player_name = dict(zip(players[PLAYER_ID_COL], players[PLAYER_NAME_COL]))
+    player_label = dict(zip(
+        players[PLAYER_ID_COL],
+        players[PLAYER_NAME_COL] + ", " + players[PLAYER_POSITION_COL],
+    ))
 
     team_rows = {team: [] for team in team_name_by_roster.values()}
 
     for r in rosters:
         team = team_name_by_roster[r["roster_id"]]
         for pid in r.get("players") or []:
-            team_rows[team].append(player_name.get(str(pid), str(pid)))
+            team_rows[team].append(player_label.get(str(pid), str(pid)))
 
     for (season, rnd, orig_roster_id), owner_roster_id in pick_ownership.items():
         team = team_name_by_roster[owner_roster_id]
