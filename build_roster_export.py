@@ -25,7 +25,7 @@ PLAYER_POSITION_COL = "position"
 PLAYER_AGE_COL = "age"
 OUTPUT_FILE = BASE_DIR / "Output" / "roster_export.xlsx"
 POSITION_ORDER = ["QB", "WR", "RB", "TE"]   # players sort into this order within each team, youngest first within a position; anything else goes last
-FUTURE_DRAFT_YEARS = 2                  # how many draft classes ahead of the current season to include
+FUTURE_DRAFT_YEARS = 3                  # how many draft classes ahead of the current season to include
 DEFAULT_ROUNDS = 4                      # fallback if the draft's round count can't be found
 BASE_URL = "https://api.sleeper.app/v1"
 # -----------------------------------------------------------------------------
