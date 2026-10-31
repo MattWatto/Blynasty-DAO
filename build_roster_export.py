@@ -1,8 +1,9 @@
 """
 Pulls rosters, league users, and traded picks from the Sleeper API, assigns every
 draft pick (traded or not) to whichever team currently owns it, joins player names,
-positions, and ages from a locally-saved players file, and writes one Excel sheet per export run with
-each team's roster listed vertically (players first, then picks).
+fantasy positions, ages, and years of experience from a locally-saved players file,
+and writes one Excel sheet per export run with each team's roster listed vertically
+(players first, then picks).
 
 Run with: python build_roster_export.py
 Requires: pip install requests pandas openpyxl
@@ -10,6 +11,7 @@ Requires: pip install requests pandas openpyxl
 Sleeper API docs: https://docs.sleeper.com/
 """
 
+import ast
 from pathlib import Path
 
 import requests
@@ -21,8 +23,9 @@ LEAGUE_ID = "1314308900652056576"
 PLAYERS_FILE = BASE_DIR / "Input" / "sleeper_players.xlsx"   # produced by the separate player-pull script
 PLAYER_ID_COL = "player_id"             # column names in PLAYERS_FILE -- adjust if different
 PLAYER_NAME_COL = "full_name"
-PLAYER_POSITION_COL = "position"
+PLAYER_FANTASY_POSITIONS_COL = "fantasy_positions"   # Sleeper's own field is a list; a stringified list like "['QB']" is also handled
 PLAYER_AGE_COL = "age"
+PLAYER_YEARS_EXP_COL = "years_exp"
 OUTPUT_FILE = BASE_DIR / "Output" / "roster_export.xlsx"
 POSITION_ORDER = ["QB", "WR", "RB", "TE"]   # players sort into this order within each team, youngest first within a position; anything else goes last
 FUTURE_DRAFT_YEARS = 3                  # how many draft classes ahead of the current season to include
@@ -42,6 +45,16 @@ def get_draft_rounds(league_id):
     if drafts and drafts[0].get("settings", {}).get("rounds"):
         return drafts[0]["settings"]["rounds"]
     return DEFAULT_ROUNDS
+
+
+def primary_position(fantasy_positions):
+    # fantasy_positions can be a real list, or a stringified one like "['QB']" if the
+    # players file was saved straight from Sleeper's API response; take the first entry either way
+    if isinstance(fantasy_positions, str) and fantasy_positions.startswith("["):
+        fantasy_positions = ast.literal_eval(fantasy_positions)
+    if isinstance(fantasy_positions, (list, tuple)):
+        return fantasy_positions[0] if fantasy_positions else None
+    return fantasy_positions
 
 
 def main():
@@ -74,15 +87,26 @@ def main():
                 key = (str(season), rnd, orig_roster_id)
                 pick_ownership[key] = traded_owner.get(key, orig_roster_id)
 
-    # player_id -> (position, age, "Name, POS (Age)")
+    # player_id -> (position, age, "Name, POS (Age y/o; Exp exp)")
     players = pd.read_excel(PLAYERS_FILE, dtype={PLAYER_ID_COL: str})
     player_info = {}
-    for pid, name, pos, age in zip(
-        players[PLAYER_ID_COL], players[PLAYER_NAME_COL], players[PLAYER_POSITION_COL], players[PLAYER_AGE_COL]
+    for pid, name, fantasy_positions, age, years_exp in zip(
+        players[PLAYER_ID_COL],
+        players[PLAYER_NAME_COL],
+        players[PLAYER_FANTASY_POSITIONS_COL],
+        players[PLAYER_AGE_COL],
+        players[PLAYER_YEARS_EXP_COL],
     ):
-        # a missing age anywhere in the column upcasts it to float64, so round-trip through int for display
-        age_text = f" ({int(age)})" if pd.notna(age) else ""
-        player_info[pid] = (pos, age, f"{name}, {pos}{age_text}")
+        pos = primary_position(fantasy_positions)
+        # a missing value anywhere in a numeric column upcasts the whole column to float64,
+        # so round-trip through int for display and just omit values that are missing
+        details = []
+        if pd.notna(age):
+            details.append(f"{int(age)} y/o")
+        if pd.notna(years_exp):
+            details.append(f"{int(years_exp)} exp")
+        details_text = f" ({'; '.join(details)})" if details else ""
+        player_info[pid] = (pos, age, f"{name}, {pos}{details_text}")
 
     team_rows = {team: [] for team in team_name_by_roster.values()}
 
