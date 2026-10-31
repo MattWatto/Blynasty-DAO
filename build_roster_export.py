@@ -2,8 +2,9 @@
 Pulls rosters, league users, and traded picks from the Sleeper API, assigns every
 draft pick (traded or not) to whichever team currently owns it, joins player names,
 fantasy positions, ages, and years of experience from a locally-saved players file,
-and writes one Excel sheet per export run with each team's roster listed vertically
-(players first, then picks).
+ranks teams by wins (fpts_decimal breaks ties), and writes one Excel sheet per export
+run with each team's roster listed vertically (players first, then picks) under a
+header like "Shakers & Bakers (1-6) 11th".
 
 Run with: python build_roster_export.py
 Requires: pip install requests pandas openpyxl
@@ -47,6 +48,14 @@ def get_draft_rounds(league_id):
     return DEFAULT_ROUNDS
 
 
+def ordinal(n):
+    if 11 <= n % 100 <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def get_positions(fantasy_positions):
     # fantasy_positions can be a real list (e.g. Travis Hunter -> ["WR", "DB"]), or a
     # stringified one like "['WR', 'DB']" if the players file was saved straight from
@@ -73,6 +82,23 @@ def main():
         user = user_by_id.get(r["owner_id"], {})
         team_name_by_roster[r["roster_id"]] = (
             (user.get("metadata") or {}).get("team_name") or user.get("display_name") or f"Roster {r['roster_id']}"
+        )
+
+    # standings rank: most wins first, fpts_decimal (higher is better) breaks ties
+    standings = sorted(
+        rosters,
+        key=lambda r: (-r.get("settings", {}).get("wins", 0), -r.get("settings", {}).get("fpts_decimal", 0)),
+    )
+    rank_by_roster = {r["roster_id"]: place for place, r in enumerate(standings, start=1)}
+
+    # column header per roster_id, e.g. "Shakers & Bakers (1-6) 11th"
+    team_header_by_roster = {}
+    for r in rosters:
+        wins = r.get("settings", {}).get("wins", 0)
+        losses = r.get("settings", {}).get("losses", 0)
+        rank = rank_by_roster[r["roster_id"]]
+        team_header_by_roster[r["roster_id"]] = (
+            f"{team_name_by_roster[r['roster_id']]} ({wins}-{losses}) {ordinal(rank)}"
         )
 
     # current owner roster_id for every (season, round, original_roster_id) pick,
@@ -109,7 +135,7 @@ def main():
         details_text = f" ({'; '.join(details)})" if details else ""
         player_info[pid] = (positions, age, f"{name}, {'/'.join(positions)}{details_text}")
 
-    team_rows = {team: [] for team in team_name_by_roster.values()}
+    team_rows = {header: [] for header in team_header_by_roster.values()}
 
     def position_rank(positions):
         # ranks by whichever listed position matches POSITION_ORDER first (e.g. a WR/DB
@@ -124,16 +150,17 @@ def main():
         return (position_rank(positions), age if pd.notna(age) else float("inf"))
 
     for r in rosters:
-        team = team_name_by_roster[r["roster_id"]]
+        team = team_header_by_roster[r["roster_id"]]
         roster_players = [player_info.get(str(pid), ([], None, str(pid))) for pid in r.get("players") or []]
         roster_players.sort(key=sort_key)
         team_rows[team].extend(label for _, _, label in roster_players)
 
     for (season, rnd, orig_roster_id), owner_roster_id in pick_ownership.items():
-        team = team_name_by_roster[owner_roster_id]
+        team = team_header_by_roster[owner_roster_id]
         if owner_roster_id == orig_roster_id:
             label = f"{season} Rd {rnd}"
         else:
+            # the plain team name here, not the decorated header, keeps this label short
             label = f"{season} Rd {rnd} (from {team_name_by_roster[orig_roster_id]})"
         team_rows[team].append(label)
 
