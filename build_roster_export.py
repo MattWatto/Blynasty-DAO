@@ -10,15 +10,17 @@ Requires: pip install requests pandas openpyxl
 Sleeper API docs: https://docs.sleeper.com/
 """
 
+from pathlib import Path
+
 import requests
 import pandas as pd
 
 # ---- config ----------------------------------------------------------------
 LEAGUE_ID = "1314308900652056576"
-PLAYERS_FILE = "sleeper_players.xlsx"   # produced by the separate player-pull script
+PLAYERS_FILE = Path("Input") / "sleeper_players.xlsx"   # produced by the separate player-pull script
 PLAYER_ID_COL = "player_id"             # column names in PLAYERS_FILE -- adjust if different
 PLAYER_NAME_COL = "full_name"
-OUTPUT_FILE = "roster_export.xlsx"
+OUTPUT_FILE = Path("Output") / "roster_export.xlsx"
 FUTURE_DRAFT_YEARS = 2                  # how many draft classes ahead of the current season to include
 DEFAULT_ROUNDS = 4                      # fallback if the draft's round count can't be found
 BASE_URL = "https://api.sleeper.app/v1"
@@ -88,6 +90,7 @@ def main():
         team_rows[team].append(label)
 
     export = pd.DataFrame({team: pd.Series(rows) for team, rows in team_rows.items()})
+    OUTPUT_FILE.parent.mkdir(exist_ok=True)
     export.to_excel(OUTPUT_FILE, index=False)
     print(f"Wrote {OUTPUT_FILE}")
 
