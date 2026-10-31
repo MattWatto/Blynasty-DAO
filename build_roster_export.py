@@ -1,7 +1,7 @@
 """
 Pulls rosters, league users, and traded picks from the Sleeper API, assigns every
-draft pick (traded or not) to whichever team currently owns it, joins player names
-and positions from a locally-saved players file, and writes one Excel sheet per export run with
+draft pick (traded or not) to whichever team currently owns it, joins player names,
+positions, and ages from a locally-saved players file, and writes one Excel sheet per export run with
 each team's roster listed vertically (players first, then picks).
 
 Run with: python build_roster_export.py
@@ -22,8 +22,9 @@ PLAYERS_FILE = BASE_DIR / "Input" / "sleeper_players.xlsx"   # produced by the s
 PLAYER_ID_COL = "player_id"             # column names in PLAYERS_FILE -- adjust if different
 PLAYER_NAME_COL = "full_name"
 PLAYER_POSITION_COL = "position"
+PLAYER_AGE_COL = "age"
 OUTPUT_FILE = BASE_DIR / "Output" / "roster_export.xlsx"
-POSITION_ORDER = ["QB", "WR", "RB", "TE"]   # players sort into this order within each team; anything else goes last
+POSITION_ORDER = ["QB", "WR", "RB", "TE"]   # players sort into this order within each team, youngest first within a position; anything else goes last
 FUTURE_DRAFT_YEARS = 2                  # how many draft classes ahead of the current season to include
 DEFAULT_ROUNDS = 4                      # fallback if the draft's round count can't be found
 BASE_URL = "https://api.sleeper.app/v1"
@@ -73,11 +74,13 @@ def main():
                 key = (str(season), rnd, orig_roster_id)
                 pick_ownership[key] = traded_owner.get(key, orig_roster_id)
 
-    # player_id -> (position, "Name, POS")
+    # player_id -> (position, age, "Name, POS (Age)")
     players = pd.read_excel(PLAYERS_FILE, dtype={PLAYER_ID_COL: str})
     player_info = {
-        pid: (pos, f"{name}, {pos}")
-        for pid, name, pos in zip(players[PLAYER_ID_COL], players[PLAYER_NAME_COL], players[PLAYER_POSITION_COL])
+        pid: (pos, age, f"{name}, {pos} ({age})")
+        for pid, name, pos, age in zip(
+            players[PLAYER_ID_COL], players[PLAYER_NAME_COL], players[PLAYER_POSITION_COL], players[PLAYER_AGE_COL]
+        )
     }
 
     team_rows = {team: [] for team in team_name_by_roster.values()}
@@ -85,11 +88,15 @@ def main():
     def position_rank(position):
         return POSITION_ORDER.index(position) if position in POSITION_ORDER else len(POSITION_ORDER)
 
+    def sort_key(player):
+        position, age, _ = player
+        return (position_rank(position), age if pd.notna(age) else float("inf"))
+
     for r in rosters:
         team = team_name_by_roster[r["roster_id"]]
-        roster_players = [player_info.get(str(pid), (None, str(pid))) for pid in r.get("players") or []]
-        roster_players.sort(key=lambda p: position_rank(p[0]))
-        team_rows[team].extend(label for _, label in roster_players)
+        roster_players = [player_info.get(str(pid), (None, None, str(pid))) for pid in r.get("players") or []]
+        roster_players.sort(key=sort_key)
+        team_rows[team].extend(label for _, _, label in roster_players)
 
     for (season, rnd, orig_roster_id), owner_roster_id in pick_ownership.items():
         team = team_name_by_roster[owner_roster_id]
