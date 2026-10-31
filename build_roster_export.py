@@ -76,12 +76,13 @@ def main():
 
     # player_id -> (position, age, "Name, POS (Age)")
     players = pd.read_excel(PLAYERS_FILE, dtype={PLAYER_ID_COL: str})
-    player_info = {
-        pid: (pos, age, f"{name}, {pos} ({age})")
-        for pid, name, pos, age in zip(
-            players[PLAYER_ID_COL], players[PLAYER_NAME_COL], players[PLAYER_POSITION_COL], players[PLAYER_AGE_COL]
-        )
-    }
+    player_info = {}
+    for pid, name, pos, age in zip(
+        players[PLAYER_ID_COL], players[PLAYER_NAME_COL], players[PLAYER_POSITION_COL], players[PLAYER_AGE_COL]
+    ):
+        # a missing age anywhere in the column upcasts it to float64, so round-trip through int for display
+        age_text = f" ({int(age)})" if pd.notna(age) else ""
+        player_info[pid] = (pos, age, f"{name}, {pos}{age_text}")
 
     team_rows = {team: [] for team in team_name_by_roster.values()}
 
